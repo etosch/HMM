@@ -1,0 +1,18 @@
+# scripts/preprocess_nltk.py
+# Script for preprocessing nltk data, since I was un able to import nltk
+# in Clojure.
+
+import nltk,os
+from nltk.corpus import treebank
+
+# Make files to hold oberved and hidden states
+def make_state_labels():
+    try:
+        f = open('../resources/tags', 'w')
+        map(lambda x: f.write(x+'\n'), 'B I O E'.split('\\s+'))
+    except IOError:
+        print 'cwd:',os.getcwd()
+
+if __name__ == "__main__":
+    make_state_labels()
+

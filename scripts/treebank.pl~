@@ -1,0 +1,32 @@
+#!usr/bin/perl
+use File::Path;
+
+sub replace_dir{
+    if (-d $_[0]){
+	print "Replace existing $_[0] (y/n):";
+	$ans = <>;
+	if ($ans eq "y"){
+	    rmtree($_);
+	    return 1;
+	}else{
+	    return 0;
+	}
+    }else{
+	return 1;
+    }
+}
+
+@output_dirs = ("../resources/treebank"
+	 , "../resources/treebank/lexeme"
+	 , "../resources/treebank/lexeme/all"
+	 , "../resources/treebank/lexeme/training"
+	 , "../resources/treebank/lexeme/testing");
+
+foreach(@output_dirs){
+    if(&replace_dir($_)){
+	mkdir($_);
+    }
+}
+
+@input_dirs = ls "../resources/treebank-source/treebank-2/tagged/wsj/";
+print @input_dirs;

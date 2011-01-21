@@ -1,0 +1,13 @@
+PLEASE NOTE: THIS IS NOT CURRENTLY WORKING CODE. 
+
+The jar listed here is an older working version.
+
+The project compiles with lein compile. A resources folder will need to be created; I did not include it because the data in my resources folder is not publicly available.
+
+The four main files are:
+src/core/training.clj
+src/core/decoding.clj
+src/core/evaluation.clj
+src/core/main.clj
+
+This is a work in progress.

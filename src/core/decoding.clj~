@@ -1,0 +1,118 @@
+(ns core.decoding
+  (:gen-class)
+  (:require [core.training]
+	    [core.evaluation])
+  (:use [core.training]
+	[core.evaluation]))
+
+(defn argmax [aarray]
+  (if (and (seq? aarray) (vector? (first aarray)))
+    (first (last (sort-by #(nth % 1) aarray)))
+    (throw (java.lang.RuntimeException. "vector-seq in max-vector must be a list of vectors"))))
+
+;; (defn get-smooth [mapping key]
+;;   (or (get mapping key) (get mapping "Unknown") 0))
+
+(defmacro $ [mapping key]
+  '(~mapping ~key '(~mapping '"Unknown" 0)))
+
+(defn get-max-prob-for-one-state [emiss state prev-matrix-entry hmm]
+  (apply max (map (fn [s] (* (prev-matrix-entry s (prev-matrix-entry "Unknown" 0))
+			     (get-smooth ((last (:transitions hmm)) s) state)
+			     (get-smooth (get-smooth (:emissions hmm) state) emiss)))
+		  (keys (:starts hmm)))))
+
+(defn get-backpointer-for-one-state [emiss state prev-matrix-entry hmm]
+  (argmax (for [s (keys (:starts hmm))]
+	    [s (* (get-smooth prev-matrix-entry s)
+		  (get-smooth (get-smooth (:transitions hmm) s) state))])))
+		
+(defn update-viterbi [emiss prob-matrix hmm]
+  (let [aa (for [state (keys (:starts hmm))] [state (get-max-prob-for-one-state emiss state (last prob-matrix) hmm)])]
+  (concat prob-matrix (list (zipmap (map first aa) (map last aa))))))
+
+(defn update-backpointer [emiss path prob-matrix hmm]
+  (let [aa (for [state (keys (:starts hmm))]
+	     [state (get-backpointer-for-one-state emiss state (last prob-matrix) hmm)])]
+    (concat path (list (zipmap (map first aa) (map last aa))))))
+
+(defn initialize-viterbi-unigram [initial-emission hmm]
+  (list (zipmap (keys (:starts hmm))
+		(map #(* (get-smooth (:starts hmm) %)
+			 (get-smooth (get-smooth (:emissions hmm) %) initial-emission))
+		     (keys (:starts hmm))))))
+
+(defn initialize-viterbi-bigram [initial-emission hmm]
+  (let [prob-matrix (initialize-viterbi-unigram (first initial-emission) hmm)]
+  (concat prob-matrix  (update-viterbi initial-emission prob-matrix hmm))))
+
+(defn initialize-viterbi-trigram [initial-emission hmm]
+  (let [prob-matrix (initialize-viterbi-bigram (take 2 initial-emission) hmm)]
+  (concat prob-matrix  (update-viterbi initial-emission prob-matrix hmm))))
+
+(defn initialize-viterbi [initial-emission hmm]
+  (let [n-gram (:n hmm)
+	order (:order hmm)]
+    (
+    (cond (= n 1) (initialize-viterbi-unigram initial-emission hmm)
+	  (= n 2) (initialize-viterbi-bigram initial-emission hmm)
+	  (= n 3) (initialize-viterbi-trigram initial-emission hmm)
+	  :else (throw (java.lang.RuntimeException "supplied n-gram not supported")))))
+
+(defn initialize-backtrace-unigram [hmm]
+  (list (zipmap (keys (:starts hmm)) (repeat "Start"))))
+
+(defn initialize-backtrace-bigram [emiss prob-matrix hmm]
+  (update-backpointer emiss (initialize-backtrace-unigram hmm) prob-matrix hmm))
+
+(defn initialize-backtrace-trigram [emiss prob-matrix hmm]
+  (update-backpointer emiss (initialize-backtrace-bigram emiss prob-matrix hmm) prob-matrix hmm))
+   
+(defn initialize-backtrace [initial-emission prob-matrix hmm]
+  (let [n (:n hmm)]
+    (cond (= n 1) (initialize-backtrace-unigram hmm)
+	  (= n 2) (initialize-backtrace-bigram initial-emission prob-matrix hmm)
+	  (= n 3) (initialize-backtrace-trigram initial-emission prob-matrix hmm)
+	  :else (throw (java.lang.RuntimeException "supplied n-gram not supported")))))
+(defn
+  ^{:doc "Takes in a emission sequence (in the form of a sentence) and an hmm."}
+  viterbi-make-path [emiss-seq hmm]
+  (let [transition-window (ngram-window (:n hmm) emiss-seq)]
+    (loop [prob-matrix (initialize-viterbi (vec (map :obs (first transition-window))) hmm) ;;where i left off
+	   path (initialize-backtrace (vec (map :obs (first (ngram-window (:n hmm) emiss-seq)))) prob-matrix hmm)
+	 e (map #(vec (map :obs %))
+		((ngram-window (:n hmm))  (.subList emiss-seq (max 1 (dec (:n hmm))) (count emiss-seq))))]
+    (cond (= 0 (count e)) ;;[path prob-matrix]
+	  [(take (count emiss-seq) path) (take (count emiss-seq) prob-matrix)]
+	  :else (recur (update-viterbi (first e) prob-matrix hmm)
+		       (update-backpointer (first e) path prob-matrix hmm)
+		       (rest e)))))
+
+(defn viterbi [emiss-seq hmm]
+  (let [path-prob-vec (viterbi-make-path emiss-seq hmm)
+	path-matrix (first path-prob-vec)
+	prob-matrix (last path-prob-vec)
+	max-state (argmax (seq (last prob-matrix)))]
+    (loop [path (list max-state)
+	   backpointers (reverse path-matrix)]
+      (if (empty? backpointers))
+	(rest (reverse path))
+	(recur (concat path (list (get (first backpointers) (last path))))
+	       (rest backpointers))))))
+
+(defn predict-state-tags [emissions-list hmm]
+  ^{:doc "Takes in an emissions list and runs viterbi on it. Returns predicted
+ state tags"}
+  (map #(viterbi % hmm) emissions-list))
+
+(defn classify-aggregate
+  [hmm classify-directory output-directory training]
+  (doall
+   (let [pairs (for [file (.listFiles (java.io.File. classify-directory))]
+		 (let [data (read-line (slurp file))
+		       classified-seq (viterbi (list data) hmm)]
+		   (spit (str classified-results)(str output-directory (java.io.File/separator) (.getName file)))
+		   [data classified-seq]))]
+     (-> (metrics (keys (:starts hmm)) (pairs 1) (map :state (pairs 0)))
+	 (write-metrics-to-file hmm training (str output-directory (java.io.File/separator) "metrics.txt"))))))
+	 

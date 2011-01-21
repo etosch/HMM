@@ -1,0 +1,49 @@
+(ns core.evaluation
+  (:require [core.training]
+	    [core.decoding])
+  (:use [core.training]
+	[core.decoding]
+	[clojure.contrib.duck-streams :only (append-spit)])
+  (:gen-class))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; EVALUATION ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn num-hits [condition predicted gold-standard]
+  (assert (= (count (flatten predicted)) (count (flatten gold-standard))))
+  (reduce + (map #(if (condition %1 %2) 1 0) (flatten predicted) (flatten gold-standard))))
+
+(defn metrics-at-tag [tag predicted gold-standard]
+  ^{:doc "Takes in a given tag, the emissions with the predicted tags, and the
+ gold standard data and returns a mapping of precision, recall, and f-measure."}
+  (assert (= (count (flatten predicted)) (count (flatten gold-standard))))
+  (let [true-positive (num-hits #(= tag %1 %2) predicted gold-standard)
+	false-positive (num-hits #(and (= tag %1) (not (= tag %2))) predicted gold-standard)
+	false-negative (num-hits #(and (not (= tag %1)) (= tag %2)) predicted gold-standard)]
+    {:precision (double (if (= 0 true-positive) 0 (/ true-positive (+ true-positive false-positive))))
+     :recall (double (if (= 0 true-positive) 0 (/ true-positive (+ true-positive false-negative))))
+     :f-measure (double (if (= 0 true-positive)
+			  0 (/
+			     (* 2 (/ true-positive (+ true-positive false-positive)) (/ true-positive (+ true-positive false-negative)))
+			     (+ (/ true-positive (+ true-positive false-negative)) (/ true-positive (+ true-positive false-positive))))))
+     }))
+
+(defn metrics [taglist predicted gold-standard]
+  (map #(vector % (metrics-at-tag % predicted gold-standard)) taglist))
+
+(defn write-metrics-to-file [mlist hmm type filename]
+  (let [meta-info (str type "\t" (:n hmm) "-gram\t" (:smoothing hmm) "\t")
+	write-me (map (fn [x] (str meta-info
+				   (first x)
+				   "\t"
+				   (apply str (map #(str % "\t") (vals (last x))))))
+		      mlist)]
+    (for [line write-me]
+      (do 
+	(append-spit filename (str line "\n"))
+	'ok))))
+
+(defn test-hmm
+  [hmm test-file state-set]
+  ;; map calculation of metrics to state tag set (requires threading)
+  (do
+    (println "write me")))
+
